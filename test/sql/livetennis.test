@@ -1,0 +1,83 @@
+# name: test/sql/livetennis.test
+# description: Offline tests for the livetennis extension (no API key required)
+# group: [sql]
+
+# Before we load the extension, the functions do not exist
+statement error
+SELECT * FROM live_tennis_matches();
+----
+Catalog Error
+
+# Require statement will ensure this test is run with this extension loaded
+require livetennis
+
+# The three table functions are registered
+query I
+SELECT count(DISTINCT function_name) FROM duckdb_functions()
+WHERE function_name IN ('live_tennis_matches', 'live_tennis_fixtures', 'live_tennis_players');
+----
+3
+
+# The extension settings are registered
+query I
+SELECT count(*) FROM duckdb_settings() WHERE name IN ('livetennis_api_key', 'livetennis_base_url');
+----
+2
+
+# Without any key configured, querying gives a clear, actionable error
+# (these tests assume LIVE_TENNIS_API_KEY is not set in the environment;
+#  the live tests in livetennis_live.test cover the keyed path)
+statement error
+SELECT * FROM live_tennis_matches();
+----
+No Live Tennis API key configured
+
+statement error
+SELECT * FROM live_tennis_fixtures('atp');
+----
+No Live Tennis API key configured
+
+statement error
+SELECT * FROM live_tennis_players('alcaraz');
+----
+No Live Tennis API key configured
+
+# NULL arguments are rejected at bind time, before any network access
+statement error
+SELECT * FROM live_tennis_players(NULL);
+----
+search argument cannot be NULL
+
+statement error
+SELECT * FROM live_tennis_fixtures(NULL);
+----
+tour argument cannot be NULL
+
+# The livetennis secret type is registered and requires API_KEY
+statement error
+CREATE SECRET incomplete_secret (TYPE livetennis);
+----
+requires an API_KEY
+
+# A secret with an unknown parameter is rejected
+statement error
+CREATE SECRET bad_secret (TYPE livetennis, API_KEY 'k', SOMETHING_ELSE 'v');
+----
+Unknown parameter
+
+# A well-formed secret can be created, and the key is redacted in duckdb_secrets()
+statement ok
+CREATE SECRET test_secret (TYPE livetennis, API_KEY 'test_key_not_real');
+
+query I
+SELECT count(*) FROM duckdb_secrets() WHERE type = 'livetennis' AND name = 'test_secret';
+----
+1
+
+query I
+SELECT secret_string LIKE '%test_key_not_real%' FROM duckdb_secrets() WHERE name = 'test_secret';
+----
+false
+
+statement ok
+DROP SECRET test_secret;

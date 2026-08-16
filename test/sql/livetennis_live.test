@@ -1,0 +1,49 @@
+# name: test/sql/livetennis_live.test
+# description: Live smoke tests against the real Live Tennis API.
+# group: [sql]
+
+#              Skipped entirely unless LIVE_TENNIS_API_KEY is set in the environment.
+
+require livetennis
+
+require-env LIVE_TENNIS_API_KEY
+
+# Player search returns rows with sane values (the roster always knows Alcaraz)
+query I
+SELECT count(*) > 0 FROM live_tennis_players('alcaraz');
+----
+true
+
+query I
+SELECT count(*) = 0 FROM live_tennis_players('alcaraz') WHERE player_id IS NULL OR name IS NULL;
+----
+true
+
+# Live matches: the count is time-dependent, so only assert the scan succeeds
+# and the schema invariants hold (every row has an id and a status)
+query I
+SELECT count(*) >= 0 FROM live_tennis_matches();
+----
+true
+
+query I
+SELECT count(*) = 0 FROM live_tennis_matches() WHERE match_id IS NULL OR status IS NULL;
+----
+true
+
+# Fixtures, unfiltered and filtered by tour
+query I
+SELECT count(*) >= 0 FROM live_tennis_fixtures();
+----
+true
+
+query I
+SELECT count(*) >= 0 FROM live_tennis_fixtures('atp');
+----
+true
+
+# An unrecognised tour is a clear 400 from the API, not a silent empty result
+statement error
+SELECT * FROM live_tennis_fixtures('not_a_tour');
+----
+HTTP 400
