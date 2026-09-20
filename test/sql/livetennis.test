@@ -18,6 +18,25 @@ WHERE function_name IN ('live_tennis_matches', 'live_tennis_fixtures', 'live_ten
 ----
 3
 
+# Every overload is discoverable without making an API request.
+query TTTT rowsort
+SELECT function_name, parameters, parameter_types, examples[1]
+FROM duckdb_functions()
+WHERE function_name IN ('live_tennis_matches', 'live_tennis_fixtures', 'live_tennis_players');
+----
+live_tennis_fixtures	[]	[]	SELECT * FROM live_tennis_fixtures();
+live_tennis_fixtures	[tour]	[VARCHAR]	SELECT * FROM live_tennis_fixtures('wta');
+live_tennis_matches	[]	[]	SELECT * FROM live_tennis_matches();
+live_tennis_players	[search]	[VARCHAR]	SELECT * FROM live_tennis_players('sinner');
+
+query I
+SELECT count(*) FROM duckdb_functions()
+WHERE function_name IN ('live_tennis_matches', 'live_tennis_fixtures', 'live_tennis_players')
+  AND description LIKE '%Live Tennis API%'
+  AND list_contains(categories, 'sports');
+----
+4
+
 # The extension settings are registered
 query I
 SELECT count(*) FROM duckdb_settings() WHERE name IN ('livetennis_api_key', 'livetennis_base_url');

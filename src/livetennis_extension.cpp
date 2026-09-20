@@ -11,6 +11,7 @@
 #include "duckdb/main/extension/extension_loader.hpp"
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.hpp"
@@ -282,7 +283,7 @@ static Value JsonToIntegerList(yyjson_val *arr) {
 	yyjson_val *item;
 	yyjson_arr_foreach(arr, idx, max, item) {
 		if (yyjson_is_null(item)) {
-			children.emplace_back(Value(LogicalType::INTEGER));
+			children.emplace_back(LogicalType::INTEGER);
 		} else if (yyjson_is_int(item)) {
 			children.emplace_back(Value::INTEGER(static_cast<int32_t>(yyjson_get_sint(item))));
 		} else {
@@ -322,9 +323,9 @@ static Value JsonToVarcharList(yyjson_val *arr) {
 	yyjson_val *item;
 	yyjson_arr_foreach(arr, idx, max, item) {
 		if (yyjson_is_null(item)) {
-			children.emplace_back(Value(LogicalType::VARCHAR));
+			children.emplace_back(LogicalType::VARCHAR);
 		} else if (yyjson_is_str(item)) {
-			children.emplace_back(Value(yyjson_get_str(item)));
+			children.emplace_back(yyjson_get_str(item));
 		} else {
 			throw InvalidInputException("Live Tennis API: expected a string inside an array");
 		}
@@ -471,10 +472,10 @@ static vector<Value> MatchToRow(yyjson_val *match) {
 	for (const auto *side : {"p1", "p2"}) {
 		auto *player = players ? yyjson_obj_get(players, side) : nullptr;
 		if (JsonMissing(player)) {
-			row.emplace_back(Value(LogicalType::BIGINT));
-			row.emplace_back(Value(LogicalType::VARCHAR));
-			row.emplace_back(Value(LogicalType::VARCHAR));
-			row.emplace_back(Value(LogicalType::INTEGER));
+			row.emplace_back(LogicalType::BIGINT);
+			row.emplace_back(LogicalType::VARCHAR);
+			row.emplace_back(LogicalType::VARCHAR);
+			row.emplace_back(LogicalType::INTEGER);
 		} else {
 			row.push_back(JsonToBigint(player, "id"));
 			row.push_back(JsonToVarchar(player, "name"));
@@ -485,14 +486,14 @@ static vector<Value> MatchToRow(yyjson_val *match) {
 
 	auto *score = yyjson_obj_get(match, "score");
 	if (JsonMissing(score)) {
-		row.emplace_back(Value(LogicalType::LIST(LogicalType::INTEGER)));
-		row.emplace_back(Value(LogicalType::LIST(LogicalType::LIST(LogicalType::INTEGER))));
-		row.emplace_back(Value(LogicalType::LIST(LogicalType::VARCHAR)));
-		row.emplace_back(Value(LogicalType::INTEGER));
-		row.emplace_back(Value(LogicalType::BOOLEAN));
-		row.emplace_back(Value(LogicalType::DOUBLE));
-		row.emplace_back(Value(LogicalType::DOUBLE));
-		row.emplace_back(Value(LogicalType::TIMESTAMP_TZ));
+		row.emplace_back(LogicalType::LIST(LogicalType::INTEGER));
+		row.emplace_back(LogicalType::LIST(LogicalType::LIST(LogicalType::INTEGER)));
+		row.emplace_back(LogicalType::LIST(LogicalType::VARCHAR));
+		row.emplace_back(LogicalType::INTEGER);
+		row.emplace_back(LogicalType::BOOLEAN);
+		row.emplace_back(LogicalType::DOUBLE);
+		row.emplace_back(LogicalType::DOUBLE);
+		row.emplace_back(LogicalType::TIMESTAMP_TZ);
 	} else {
 		row.push_back(JsonToIntegerList(yyjson_obj_get(score, "sets")));
 		row.push_back(JsonToIntegerListList(yyjson_obj_get(score, "games")));
@@ -707,17 +708,49 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// live_tennis_matches()
 	TableFunction matches("live_tennis_matches", {}, LiveTennisScan, MatchesBind, MatchesInit);
-	loader.RegisterFunction(matches);
+	CreateTableFunctionInfo matches_info(std::move(matches));
+	matches_info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+	FunctionDescription matches_description;
+	matches_description.description = "Return live matches and scores from the Live Tennis API; requires an API key.";
+	matches_description.examples = {"SELECT * FROM live_tennis_matches();"};
+	matches_description.categories = {"sports"};
+	matches_info.descriptions.push_back(std::move(matches_description));
+	loader.RegisterFunction(std::move(matches_info));
 
 	// live_tennis_fixtures() / live_tennis_fixtures(tour)
 	TableFunctionSet fixtures("live_tennis_fixtures");
 	fixtures.AddFunction(TableFunction({}, LiveTennisScan, FixturesBind, FixturesInit));
 	fixtures.AddFunction(TableFunction({LogicalType::VARCHAR}, LiveTennisScan, FixturesBind, FixturesInit));
-	loader.RegisterFunction(fixtures);
+	CreateTableFunctionInfo fixtures_info(std::move(fixtures));
+	fixtures_info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+	FunctionDescription fixtures_description;
+	fixtures_description.description =
+	    "Return upcoming fixtures across all tours from the Live Tennis API; requires an API key.";
+	fixtures_description.examples = {"SELECT * FROM live_tennis_fixtures();"};
+	fixtures_description.categories = {"sports"};
+	fixtures_info.descriptions.push_back(std::move(fixtures_description));
+	FunctionDescription tour_description;
+	tour_description.parameter_types = {LogicalType::VARCHAR};
+	tour_description.parameter_names = {"tour"};
+	tour_description.description =
+	    "Return upcoming fixtures for the given tour from the Live Tennis API; requires an API key.";
+	tour_description.examples = {"SELECT * FROM live_tennis_fixtures('wta');"};
+	tour_description.categories = {"sports"};
+	fixtures_info.descriptions.push_back(std::move(tour_description));
+	loader.RegisterFunction(std::move(fixtures_info));
 
 	// live_tennis_players(search)
 	TableFunction players("live_tennis_players", {LogicalType::VARCHAR}, LiveTennisScan, PlayersBind, PlayersInit);
-	loader.RegisterFunction(players);
+	CreateTableFunctionInfo players_info(std::move(players));
+	players_info.on_conflict = OnCreateConflict::ALTER_ON_CONFLICT;
+	FunctionDescription players_description;
+	players_description.parameter_types = {LogicalType::VARCHAR};
+	players_description.parameter_names = {"search"};
+	players_description.description = "Search players by name using the Live Tennis API; requires an API key.";
+	players_description.examples = {"SELECT * FROM live_tennis_players('sinner');"};
+	players_description.categories = {"sports"};
+	players_info.descriptions.push_back(std::move(players_description));
+	loader.RegisterFunction(std::move(players_info));
 }
 
 void LivetennisExtension::Load(ExtensionLoader &loader) {
